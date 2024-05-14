@@ -1,20 +1,76 @@
 import sys
 from custome_errors import *
 sys.excepthook = my_excepthook
+import soundfile
 import update
 import gui
 import guiTools
+import speech_recognition as SR
 from settings import *
 import PyQt6.QtWidgets as qt
 import PyQt6.QtGui as qt1
 import PyQt6.QtCore as qt2
 language.init_translation()
-class main (qt.QMainWindow):
+class Thread(qt2.QThread):
+    finish=qt2.pyqtSignal(str)
+    def __init__(self,p,service,languageCodeOrApiKey,path):
+        super().__init__(p)
+        self.service=service
+        self.LanguageCodeOrAPIKey=languageCodeOrApiKey
+        self.path=path
+    def run(self):
+        try:
+            data,sampleRate=soundfile.read(self.path)
+            soundfile.write("data/result.wav",data,sampleRate)
+            path="data/result.wav"
+        except:
+            path=self.path
+        recognizer=SR.Recognizer()
+        try:
+            with SR.AudioFile(path) as SRC:
+                audio=recognizer.record(SRC)
+                text=""
+                try:
+                    if self.service==0:
+                        text=recognizer.recognize_google(audio,language=self.LanguageCodeOrAPIKey)
+                    elif self.service==1:
+                        text=recognizer.recognize_wit(audio,self.LanguageCodeOrAPIKey)
+                except Exception as error:
+                    text=_("an error record")
+        except:
+            text="error"
+        self.finish.emit(text)
+class main (qt.QMainWindow ):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(app.name + _("version : ") + str(app.version))
         layout=qt.QVBoxLayout()
-        
+        self.service=qt.QComboBox()
+        self.service.addItems([_("google"),"wit.AI"])
+        self.service.currentIndexChanged.connect(self.on_change_service)
+
+        layout.addWidget(qt.QLabel(_("select service")))
+        layout.addWidget(self.service)
+        self.language=qt.QComboBox()
+        layout.addWidget(qt.QLabel(_("select language")))
+        layout.addWidget(self.language)
+        self.path=qt.QLineEdit()
+        self.path.setReadOnly(True)
+        layout.addWidget(qt.QLabel(_("path")))
+        layout.addWidget(self.path)
+        self.browse=qt.QPushButton(_("browse"))
+        self.browse.setDefault(True)
+        self.browse.clicked.connect(self.on_browse)
+        layout.addWidget(self.browse)
+        self.convert=qt.QPushButton(_("convert to text"))
+        self.convert.setDefault(True)
+        self.convert.clicked.connect(self.on_convert)
+        layout.addWidget(self.convert)
+        self.result=qt.QLineEdit()
+        self.result.setReadOnly(True)
+        layout.addWidget(qt.QLabel(_("result")))
+        layout.addWidget(self.result)
+        self.on_change_service(0)
         self.setting=qt.QPushButton(_("settings"))
         self.setting.setDefault(True)
         self.setting.clicked.connect(lambda: settings(self).exec())
@@ -71,7 +127,28 @@ class main (qt.QMainWindow):
                 event.ignore()
         else:
             self.close()
-
+    def on_change_service(self,index):
+        self.language.clear()
+        if index==0:
+            self.language.addItems(guiTools.dictionarys.languages)
+        elif index==1:
+            self.language.addItems(gui.witJsonControl.get())
+    def on_browse(self):
+        file=qt.QFileDialog(self)   
+        if file.exec()==file.DialogCode.Accepted:
+            self.path.setText(file.selectedFiles()[0])
+    def on_finish_converting(self,result):
+        self.result.setText(result)
+        self.result.setFocus()
+    def on_convert(self):
+        service=self.service.currentIndex()
+        if service==0:
+            languageOrApi=guiTools.dictionarys.languages[self.language.currentText()]
+        elif service==1:
+            languageOrApi=gui.witJsonControl.get()[self.language.currentText()]
+        thread=Thread(self,self.service.currentIndex(),languageOrApi,self.path.text())
+        thread.finish.connect(self.on_finish_converting)
+        thread.start()
 App=qt.QApplication([])
 w=main()
 w.show()
